@@ -1,4 +1,4 @@
-// script.js — Complete frontend with FastAPI backend connection
+// script.js — Optimized Chatbot with Smooth UI Experience
 
 (function() {
     // DOM elements
@@ -7,11 +7,12 @@
     const sendButton = document.getElementById('sendButton');
     
     // Backend configuration
-    const BACKEND_URL = 'http://localhost:8000';  // Change this to your backend URL
-    let sessionId = null;  // Will store session ID for conversation history
+    const BACKEND_URL = 'http://localhost:8000';
+    let sessionId = null;
     let isBackendConnected = false;
+    let isSending = false; // Prevent multiple simultaneous sends
     
-    // Helper: Get current formatted time (HH:MM AM/PM)
+    // Helper: Get current formatted time
     function getFormattedTime() {
         const now = new Date();
         let hours = now.getHours();
@@ -26,6 +27,8 @@
     function createMessageElement(text, sender, timestamp = null) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${sender === 'user' ? 'user-message' : 'bot-message'}`;
+        messageDiv.style.opacity = '0';
+        messageDiv.style.transform = 'translateY(10px)';
         
         const bubbleDiv = document.createElement('div');
         bubbleDiv.className = 'message-bubble';
@@ -41,10 +44,17 @@
         messageDiv.appendChild(bubbleDiv);
         messageDiv.appendChild(metaDiv);
         
+        // Animate message appearance
+        setTimeout(() => {
+            messageDiv.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+            messageDiv.style.opacity = '1';
+            messageDiv.style.transform = 'translateY(0)';
+        }, 10);
+        
         return messageDiv;
     }
     
-    // Scroll to bottom
+    // Scroll to bottom smoothly
     function scrollToBottom() {
         if (chatMessagesContainer) {
             chatMessagesContainer.scrollTo({
@@ -54,7 +64,7 @@
         }
     }
     
-    // Add message to UI
+    // Add message to UI with animation
     function addMessage(text, sender, timestamp = null) {
         if (!text || text.trim() === '') return;
         const messageElement = createMessageElement(text.trim(), sender, timestamp);
@@ -63,7 +73,7 @@
         return messageElement;
     }
     
-    // Show typing indicator
+    // Typing indicator management
     let typingIndicatorElement = null;
     
     function showTypingIndicator() {
@@ -71,6 +81,7 @@
         
         typingIndicatorElement = document.createElement('div');
         typingIndicatorElement.className = 'message bot-message typing-indicator-container';
+        typingIndicatorElement.style.opacity = '0';
         
         const bubbleDiv = document.createElement('div');
         bubbleDiv.className = 'message-bubble typing-bubble';
@@ -91,50 +102,32 @@
         typingIndicatorElement.appendChild(metaDiv);
         
         chatMessagesContainer.appendChild(typingIndicatorElement);
+        
+        // Fade in animation
+        setTimeout(() => {
+            if (typingIndicatorElement) {
+                typingIndicatorElement.style.transition = 'opacity 0.2s ease';
+                typingIndicatorElement.style.opacity = '1';
+            }
+        }, 10);
+        
         scrollToBottom();
     }
     
     function removeTypingIndicator() {
         if (typingIndicatorElement && typingIndicatorElement.parentNode) {
-            typingIndicatorElement.remove();
-            typingIndicatorElement = null;
-        }
-    }
-    
-    // Check backend connection status
-    async function checkBackendConnection() {
-        try {
-            const response = await fetch(`${BACKEND_URL}/health`, {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                timeout: 5000  // 5 second timeout
-            });
-            
-            if (response.ok) {
-                const data = await response.json();
-                isBackendConnected = true;
-                console.log('✅ Backend connected:', data);
-                
-                // Add connection status message (only if not already present)
-                const statusMessage = document.querySelector('.connection-status');
-                if (!statusMessage) {
-                    addSystemMessage('✅ Connected to backend server', 'success');
+            typingIndicatorElement.style.transition = 'opacity 0.2s ease';
+            typingIndicatorElement.style.opacity = '0';
+            setTimeout(() => {
+                if (typingIndicatorElement && typingIndicatorElement.parentNode) {
+                    typingIndicatorElement.remove();
                 }
-                return true;
-            } else {
-                throw new Error('Backend not responding');
-            }
-        } catch (error) {
-            isBackendConnected = false;
-            console.error('❌ Backend connection failed:', error);
-            addSystemMessage('⚠️ Backend server not connected. Please make sure the server is running on ' + BACKEND_URL, 'error');
-            return false;
+                typingIndicatorElement = null;
+            }, 200);
         }
     }
     
-    // Add system message (for connection status, errors, etc.)
+    // Add system message
     function addSystemMessage(text, type = 'info') {
         const systemDiv = document.createElement('div');
         systemDiv.className = `system-message ${type}`;
@@ -148,80 +141,112 @@
             border-radius: 8px;
             margin: 0.5rem 0;
             font-weight: 500;
+            opacity: 0;
+            transform: translateY(-10px);
+            transition: opacity 0.3s ease, transform 0.3s ease;
         `;
         chatMessagesContainer.appendChild(systemDiv);
+        
+        // Animate in
+        setTimeout(() => {
+            systemDiv.style.opacity = '1';
+            systemDiv.style.transform = 'translateY(0)';
+        }, 10);
+        
         scrollToBottom();
         
         // Auto-remove after 5 seconds
         setTimeout(() => {
             if (systemDiv.parentNode) {
-                systemDiv.remove();
+                systemDiv.style.opacity = '0';
+                systemDiv.style.transform = 'translateY(-10px)';
+                setTimeout(() => {
+                    if (systemDiv.parentNode) systemDiv.remove();
+                }, 300);
             }
         }, 5000);
     }
     
-    // Send message to backend
-    async function sendMessageToBackend(userMessage) {
+    // Check backend connection
+    async function checkBackendConnection() {
         try {
-            // Generate session ID if not exists
-            if (!sessionId) {
-                sessionId = 'session_' + Date.now();
-            }
-            
-            const response = await fetch(`${BACKEND_URL}/chat`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    message: userMessage,
-                    session_id: sessionId
-                })
+            const response = await fetch(`${BACKEND_URL}/health`, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+                signal: AbortSignal.timeout(3000) // 3 second timeout
             });
             
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || 'Failed to get response');
+            if (response.ok) {
+                isBackendConnected = true;
+                console.log('✅ Backend connected');
+                return true;
+            } else {
+                throw new Error('Backend not responding');
             }
-            
-            const data = await response.json();
-            return data.reply;
-            
         } catch (error) {
-            console.error('Error sending message:', error);
-            throw new Error(error.message || 'Network error. Make sure the backend server is running.');
+            isBackendConnected = false;
+            console.error('❌ Backend connection failed:', error.message);
+            return false;
         }
     }
     
-    // Main send message handler
+    // Send message to backend API
+    async function sendMessageToBackend(userMessage) {
+        // Generate session ID if not exists
+        if (!sessionId) {
+            sessionId = 'session_' + Date.now();
+        }
+        
+        const response = await fetch(`${BACKEND_URL}/chat`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                message: userMessage,
+                session_id: sessionId
+            }),
+            signal: AbortSignal.timeout(10000) // 10 second timeout
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || 'Failed to get response');
+        }
+        
+        const data = await response.json();
+        return data.reply;
+    }
+    
+    // UPDATED: Main send message function with optimized flow
     async function handleSendMessage() {
+        // Prevent multiple simultaneous sends
+        if (isSending) return;
+        
         const userMessage = messageInput.value.trim();
         if (!userMessage) return;
         
-        // Disable input while processing
+        isSending = true;
+        
+        // Step 1: Display user message instantly
+        addMessage(userMessage, 'user');
+        
+        // Step 2: Clear input and disable controls immediately
+        messageInput.value = '';
         messageInput.disabled = true;
         sendButton.disabled = true;
         
-        // Add user message to chat
-        addMessage(userMessage, 'user');
-        messageInput.value = '';
-        
-        // Check backend connection first
-        if (!isBackendConnected) {
-            await checkBackendConnection();
-        }
-        
-        // Show typing indicator
+        // Step 3: Show typing indicator
         showTypingIndicator();
         
         try {
-            // Get bot response from backend
+            // Step 4: Send request to backend API
             const botReply = await sendMessageToBackend(userMessage);
             
-            // Remove typing indicator
+            // Step 5: Remove typing indicator
             removeTypingIndicator();
             
-            // Add bot response to chat
+            // Step 6: Display bot response in UI
             addMessage(botReply, 'bot');
             
         } catch (error) {
@@ -234,11 +259,13 @@
             
             // Try to reconnect
             await checkBackendConnection();
+            
         } finally {
-            // Re-enable input
+            // Re-enable controls
             messageInput.disabled = false;
             sendButton.disabled = false;
             messageInput.focus();
+            isSending = false;
         }
     }
     
@@ -256,12 +283,22 @@
             
             if (response.ok) {
                 addSystemMessage('Conversation history cleared', 'success');
-                // Clear messages from UI (keep system messages)
-                const messages = document.querySelectorAll('.message, .system-message');
-                messages.forEach(msg => msg.remove());
                 
-                // Add welcome message back
-                addMessage("Hello! I'm your AI assistant. How can I help you today? ✨", 'bot');
+                // Clear all messages with animation
+                const messages = document.querySelectorAll('.message');
+                messages.forEach((msg, index) => {
+                    setTimeout(() => {
+                        msg.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+                        msg.style.opacity = '0';
+                        msg.style.transform = 'translateX(-10px)';
+                        setTimeout(() => msg.remove(), 200);
+                    }, index * 50);
+                });
+                
+                // Add welcome message back after clearing
+                setTimeout(() => {
+                    addMessage("Hello! I'm your AI assistant. How can I help you today? ✨", 'bot');
+                }, messages.length * 50 + 100);
             } else {
                 throw new Error('Failed to clear history');
             }
@@ -271,20 +308,28 @@
         }
     }
     
-    // Add keyboard shortcut (Ctrl/Cmd + K to clear)
+    // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
+        // Ctrl/Cmd + K to clear
         if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
             e.preventDefault();
             clearHistory();
         }
+        
+        // Escape to clear input
+        if (e.key === 'Escape' && !messageInput.disabled) {
+            messageInput.value = '';
+        }
     });
     
-    // Inject typing animation styles (if not already present)
-    function injectTypingStyles() {
-        if (document.getElementById('typingAnimationStyles')) return;
+    // Inject styles
+    function injectStyles() {
+        if (document.getElementById('chatbotStyles')) return;
+        
         const styleSheet = document.createElement('style');
-        styleSheet.id = 'typingAnimationStyles';
+        styleSheet.id = 'chatbotStyles';
         styleSheet.textContent = `
+            /* Typing indicator styles */
             .typing-indicator-container .typing-bubble {
                 background: #ffffff;
                 border: 1px solid #e9eef3;
@@ -296,11 +341,13 @@
                 justify-content: center;
                 min-width: 56px;
             }
+            
             .typing-dots {
                 display: inline-flex;
                 gap: 4px;
                 align-items: center;
             }
+            
             .typing-dots span {
                 width: 6px;
                 height: 6px;
@@ -309,12 +356,10 @@
                 display: inline-block;
                 animation: typingBounce 1.2s infinite ease-in-out both;
             }
-            .typing-dots span:nth-child(1) {
-                animation-delay: -0.32s;
-            }
-            .typing-dots span:nth-child(2) {
-                animation-delay: -0.16s;
-            }
+            
+            .typing-dots span:nth-child(1) { animation-delay: -0.32s; }
+            .typing-dots span:nth-child(2) { animation-delay: -0.16s; }
+            
             @keyframes typingBounce {
                 0%, 80%, 100% {
                     transform: scale(0.6);
@@ -332,7 +377,7 @@
                 cursor: not-allowed;
             }
             
-            /* Connection status indicator in header */
+            /* Connection status indicator */
             .connection-status-indicator {
                 display: inline-block;
                 width: 8px;
@@ -361,11 +406,21 @@
                     box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
                 }
             }
+            
+            /* Clear button hover effect */
+            .clear-history-btn:hover {
+                background: #f1f5f9 !important;
+            }
+            
+            /* Smooth message animations */
+            .message {
+                transition: opacity 0.3s ease, transform 0.3s ease;
+            }
         `;
         document.head.appendChild(styleSheet);
     }
     
-    // Add connection status to header
+    // Add connection indicator
     function addConnectionIndicator() {
         const headerContent = document.querySelector('.header-content');
         if (headerContent && !document.querySelector('.connection-status-indicator')) {
@@ -376,7 +431,6 @@
         }
     }
     
-    // Update connection indicator
     function updateConnectionIndicator(connected) {
         const indicator = document.getElementById('connectionIndicator');
         if (indicator) {
@@ -388,62 +442,7 @@
         }
     }
     
-    // Periodically check backend connection
-    let connectionCheckInterval;
-    
-    function startConnectionMonitoring() {
-        // Check immediately
-        checkBackendConnection().then(connected => {
-            updateConnectionIndicator(connected);
-        });
-        
-        // Then check every 30 seconds
-        connectionCheckInterval = setInterval(async () => {
-            const connected = await checkBackendConnection();
-            updateConnectionIndicator(connected);
-        }, 30000);
-    }
-    
-    // Initialize the chat
-    async function initialize() {
-        // Inject styles
-        injectTypingStyles();
-        
-        // Add connection indicator to header
-        addConnectionIndicator();
-        
-        // Update welcome message timestamp
-        const existingInitialMessage = document.querySelector('#chatMessages .bot-message');
-        if (existingInitialMessage && existingInitialMessage.querySelector('.message-time')) {
-            const timeElem = existingInitialMessage.querySelector('.message-time');
-            if (timeElem && timeElem.textContent === 'just now') {
-                timeElem.textContent = getFormattedTime();
-            }
-        }
-        
-        // Check backend connection
-        await checkBackendConnection();
-        updateConnectionIndicator(isBackendConnected);
-        
-        // Start monitoring connection
-        startConnectionMonitoring();
-        
-        // Add event listeners
-        sendButton.addEventListener('click', handleSendMessage);
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !messageInput.disabled) {
-                e.preventDefault();
-                handleSendMessage();
-            }
-        });
-        
-        // Focus input
-        messageInput.focus();
-        
-        console.log('✨ Chat UI initialized with backend connection at', BACKEND_URL);
-    }
-    
-    // Add clear history button to UI (optional)
+    // Add clear button
     function addClearButton() {
         const headerContent = document.querySelector('.header-content');
         if (headerContent && !document.querySelector('.clear-history-btn')) {
@@ -459,21 +458,59 @@
                 cursor: pointer;
                 color: #64748b;
                 transition: all 0.2s;
+                margin-left: 12px;
             `;
-            clearBtn.onmouseover = () => {
-                clearBtn.style.background = '#f1f5f9';
-            };
-            clearBtn.onmouseout = () => {
-                clearBtn.style.background = 'none';
-            };
+            clearBtn.onmouseover = () => { clearBtn.style.background = '#f1f5f9'; };
+            clearBtn.onmouseout = () => { clearBtn.style.background = 'none'; };
             clearBtn.onclick = clearHistory;
             headerContent.appendChild(clearBtn);
         }
     }
     
-    // Add clear button
-    addClearButton();
+    // Monitor connection
+    let connectionCheckInterval;
     
-    // Start the application
+    function startConnectionMonitoring() {
+        checkBackendConnection().then(connected => {
+            updateConnectionIndicator(connected);
+        });
+        
+        connectionCheckInterval = setInterval(async () => {
+            const connected = await checkBackendConnection();
+            updateConnectionIndicator(connected);
+        }, 30000);
+    }
+    
+    // Initialize
+    async function initialize() {
+        injectStyles();
+        addConnectionIndicator();
+        addClearButton();
+        
+        // Update welcome message timestamp
+        const existingInitialMessage = document.querySelector('#chatMessages .bot-message');
+        if (existingInitialMessage && existingInitialMessage.querySelector('.message-time')) {
+            const timeElem = existingInitialMessage.querySelector('.message-time');
+            if (timeElem && timeElem.textContent === 'just now') {
+                timeElem.textContent = getFormattedTime();
+            }
+        }
+        
+        await checkBackendConnection();
+        updateConnectionIndicator(isBackendConnected);
+        startConnectionMonitoring();
+        
+        sendButton.addEventListener('click', handleSendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !messageInput.disabled && !isSending) {
+                e.preventDefault();
+                handleSendMessage();
+            }
+        });
+        
+        messageInput.focus();
+        console.log('✨ Chat UI initialized - Ready for messages!');
+    }
+    
     initialize();
 })();
